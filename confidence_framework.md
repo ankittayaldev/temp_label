@@ -301,7 +301,7 @@ No new infrastructure: same Postgres / same pgvector / same Azure embedding depl
 
 ---
 
-## 8. What Changed From the Client's POV
+## 8. What Changed
 
 | Aspect                  | Before                                  | After                                                      |
 | ----------------------- | --------------------------------------- | ---------------------------------------------------------- |
