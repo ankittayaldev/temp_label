@@ -73,7 +73,7 @@ As soon as the commit/PR is merged into the **Dev** branch:
 
 ## Where the Code Lives in Dev
 
-* Code for Dev lives in the **Dev branch**
+* Code for Dev lives in the **Dev branch** , Server only has ECR docker image.
 
 ---
 
