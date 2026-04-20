@@ -313,16 +313,6 @@ No new infrastructure: same Postgres / same pgvector / same Azure embedding depl
 
 ---
 
-## 9. Open Items / Next Steps
-
-1. **Weight tuning.** Start with 50/50; revisit once we have ≥ a few hundred human-reviewed labels. A simple logistic fit on `(GPT, RAG) → reviewer-accepted` would give a principled weight.
-2. **Validator model** (dropped option #2). Can be revisited if cost ceiling loosens — would give a third independent signal.
-3. **Token probability** (dropped option #5). Not available from the current Azure Responses endpoint; will track whether it appears in future SDK versions.
-4. **Extraction accuracy** and **validation accuracy** (the other two scores from the client mail) are not yet covered by this work; current scope is **replacement relevance**. We should decide whether extraction/validation accuracies are separate tracks or reuse the same grounding primitive.
-5. **Calibration dashboard.** Plot `score` distribution + reviewer-acceptance rate per score bucket to show the number actually predicts review outcomes.
-
----
-
-## 10. One-line Summary
+## 9. One-line Summary
 
 > *For every invalid claim we now emit two independent, bounded-in-[0,1] confidence numbers — GPT's self-assessed `replacement_confidence` and a pgvector `retrieval_grounding_score` — and expose their 50/50 weighted average as `score`. Same pipeline, one extra embedding + one extra SQL, no new infra. Sample run on 21 claims shows the combined score is a meaningful, non-destabilising adjustment to the GPT-only baseline.*
