@@ -55,7 +55,7 @@ Create another Pull Request (PR) from:
 **Review requirement:**
 
 * GitHub Copilot manual code review
-* No teammate review required
+* Teammate review required
 
 This is because the **Dev environment is used for fast testing and quick feature movement**.
 
@@ -63,7 +63,7 @@ This is because the **Dev environment is used for fast testing and quick feature
 
 Once approved, merge the PR into the **Dev** branch.
 
-## Step 7: Dev Deployment
+## Step 7: Dev Deployment : AUTOMATIC
 
 As soon as the commit/PR is merged into the **Dev** branch:
 
@@ -103,7 +103,7 @@ There is **no automatic CI/CD** for QA.
 Deployment is done manually:
 
 1. Code lives in the **QA branch**
-2. **Shashank** manually copies the code to the **Indegene QA server**
+2. Devkraft lead with Indegene Laptop
 3. `docker-compose_qa.yaml` rebuilds the image
 4. The rebuilt image is deployed on the QA server
 
