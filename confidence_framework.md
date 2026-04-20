@@ -288,20 +288,7 @@ All 21 claims from `sample_verified_json.json`. `Δ = NEW − OLD`.
 
 ---
 
-## 7. Implementation Surface (files touched)
-
-| File                                            | Role                                                            |
-| ----------------------------------------------- | --------------------------------------------------------------- |
-| `label/processors/prompt_templates/rag_prompt.py` | `VERIFICATION_SYSTEM_PROMPT` — prompt that elicits `replacement_confidence` |
-| `label/DAL/models/tables.py`                    | `RagChunkPg` — pgvector-backed chunk table with `dense_embedding` + HNSW |
-| `label/db.py`                                   | `calculate_retrieval_grounding_score_pg` — single-SQL max-cosine against the GPT-seen chunk set |
-| `label/routes/rag.py`                           | `_verify_single_claim_hybrid_from_results` — wires GPT call → embed replacement → grounding SQL → weighted average; persists `replacement_confidence`, `retrieval_grounding_score`, and the combined `score` into `ClaimResultPg` |
-
-No new infrastructure: same Postgres / same pgvector / same Azure embedding deployment already used by the retrieval pipeline.
-
----
-
-## 8. What Changed
+## 7. What Changed
 
 | Aspect                  | Before                                  | After                                                      |
 | ----------------------- | --------------------------------------- | ---------------------------------------------------------- |
@@ -313,6 +300,6 @@ No new infrastructure: same Postgres / same pgvector / same Azure embedding depl
 
 ---
 
-## 9. One-line Summary
+## 8. One-line Summary
 
 > *For every invalid claim we now emit two independent, bounded-in-[0,1] confidence numbers — GPT's self-assessed `replacement_confidence` and a pgvector `retrieval_grounding_score` — and expose their 50/50 weighted average as `score`. Same pipeline, one extra embedding + one extra SQL, no new infra. Sample run on 21 claims shows the combined score is a meaningful, non-destabilising adjustment to the GPT-only baseline.*
