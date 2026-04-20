@@ -22,7 +22,7 @@ Final score shipped = **weighted average (50% GPT + 50% RAG)**.
 
 ```
           ┌─────────────────────────────────────────────────────────────┐
- claim ──▶│  Hybrid retrieval (Qdrant RRF)  →  top-k source chunks      │
+ claim ──▶│  Hybrid retrieval (RRF)  →  top-k source chunks      │
           └─────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
