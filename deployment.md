@@ -109,7 +109,7 @@ Deployment is done manually:
 
 ## Where the Code Lives in QA
 
-* Code for QA lives in the **QA branch**
+* Code for QA lives in the **QA branch** and on QA server (because docker-compose makes image)
 
 ---
 
