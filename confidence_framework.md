@@ -16,7 +16,8 @@ Proposed five candidate approaches. We evaluated each for cost/feasibility:
 
 Final score shipped = **weighted average (50% GPT + 50% RAG)**.
 
-> One-line Summary: 
+> One-line Summary:
+> 
 > *For every invalid claim we now emit two independent, bounded-in-[0,1] confidence numbers — GPT's self-assessed `replacement_confidence` and a pgvector `retrieval_grounding_score` — and expose their 50/50 weighted average as `score`. Same pipeline, one extra embedding + one extra SQL, no new infra. Sample run on 21 claims shows the combined score is a meaningful, non-destabilising adjustment to the GPT-only baseline.*
 
 ---
