@@ -4,17 +4,20 @@
 
 ## 1. Background —
 
-Amiyanshu's mail proposed five candidate approaches. We evaluated each for cost/feasibility:
+Proposed five candidate approaches. We evaluated each for cost/feasibility:
 
 | # | Approach                         | Feasibility                       | Status        |
 | - | -------------------------------- | --------------------------------- | ------------- |
 | 1 | **Self-consistency (GPT)**       | High cost/time but implementable  | **Done**      |
 | 2 | Validator model                  | High cost/time, extra model in loop | Dropped     |
-| 3 | Rule validation                  | Already enforced inside the prompt  | Not needed  |
+| 3 | Rule validation                  | Already enforced inside prompt and rule engine | Not needed  |
 | 4 | **Retrieval grounding score**    | Feasible using existing pgvector    | **Done**    |
 | 5 | Token probability                | Not available from the Azure Responses API | Dropped |
 
 Final score shipped = **weighted average (50% GPT + 50% RAG)**.
+
+> One-line Summary: 
+> *For every invalid claim we now emit two independent, bounded-in-[0,1] confidence numbers — GPT's self-assessed `replacement_confidence` and a pgvector `retrieval_grounding_score` — and expose their 50/50 weighted average as `score`. Same pipeline, one extra embedding + one extra SQL, no new infra. Sample run on 21 claims shows the combined score is a meaningful, non-destabilising adjustment to the GPT-only baseline.*
 
 ---
 
@@ -300,6 +303,4 @@ All 21 claims from `sample_verified_json.json`. `Δ = NEW − OLD`.
 
 ---
 
-## 8. One-line Summary
 
-> *For every invalid claim we now emit two independent, bounded-in-[0,1] confidence numbers — GPT's self-assessed `replacement_confidence` and a pgvector `retrieval_grounding_score` — and expose their 50/50 weighted average as `score`. Same pipeline, one extra embedding + one extra SQL, no new infra. Sample run on 21 claims shows the combined score is a meaningful, non-destabilising adjustment to the GPT-only baseline.*
