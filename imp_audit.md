@@ -220,6 +220,11 @@ Recommended model after migration:
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
+    __table_args__ = {
+        "postgresql_partition_by": "RANGE (created_at)",
+        "extend_existing": True,
+    }
+
     id = Column(String, primary_key=True)
     chain_seq = Column(Integer, nullable=False)
     event_type = Column(String, nullable=False)
@@ -245,6 +250,11 @@ from sqlalchemy import BigInteger
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+
+    __table_args__ = {
+        "postgresql_partition_by": "RANGE (created_at)",
+        "extend_existing": True,
+    }
 
     id = Column(String, primary_key=True)
     chain_seq = Column(BigInteger, nullable=False)
@@ -437,6 +447,15 @@ db.commit()
 ## Startup Latest Hash Logging
 
 On app startup, print the latest hash.
+
+In this project, `create_app()` in `label/main.py` already calls `init_db()` during startup. The cleanest wiring is:
+
+1. keep `init_db()` as-is for migrations and admin seeding
+2. after `init_db()`, open a short DB session
+3. query latest `audit_logs` hash
+4. log it once
+
+The startup log should not fail app startup if `audit_logs` does not exist yet during first bootstrap. Log a warning and continue.
 
 Example function:
 
@@ -643,7 +662,11 @@ import sqlalchemy as sa
 GENESIS_HASH = "0" * 64
 HASH_ALGO = "HMAC-SHA256"
 CHAIN_VERSION = 1
-SCHEMA = "label_schema"
+try:
+    from settings import resolve_schema_name
+    SCHEMA = resolve_schema_name()
+except Exception:
+    SCHEMA = "label_schema"
 
 
 def _normalize_datetime(value: Any) -> Any:
@@ -687,6 +710,25 @@ def upgrade():
 
     # 1. Rename existing table.
     op.execute(f"ALTER TABLE {SCHEMA}.audit_logs RENAME TO audit_logs_old")
+
+    # Important: renaming a table does not automatically rename every old
+    # constraint/index. Rename the old primary key if it exists, otherwise the
+    # new partitioned table may fail to create audit_logs_pkey.
+    op.execute(f"""
+    DO $$
+    BEGIN
+        IF EXISTS (
+            SELECT 1
+            FROM pg_constraint c
+            JOIN pg_namespace n ON n.oid = c.connamespace
+            WHERE n.nspname = '{SCHEMA}'
+              AND c.conname = 'audit_logs_pkey'
+        ) THEN
+            ALTER TABLE {SCHEMA}.audit_logs_old
+            RENAME CONSTRAINT audit_logs_pkey TO audit_logs_old_pkey;
+        END IF;
+    END $$;
+    """)
 
     # 2. Create new partitioned parent table.
     op.execute(f"""
@@ -861,6 +903,39 @@ def downgrade():
 ```
 
 ## Important Migration Notes
+
+### Schema Name
+
+This repository supports a dynamic schema through `SCHEMA_NAME` and `resolve_schema_name()` in `label/settings.py`.
+
+Do not hardcode `label_schema` in the final migration unless the deployment always uses that schema. Prefer:
+
+```python
+try:
+    from settings import resolve_schema_name
+    SCHEMA = resolve_schema_name()
+except Exception:
+    SCHEMA = "label_schema"
+```
+
+### Constraint and Index Name Collisions
+
+When PostgreSQL renames `audit_logs` to `audit_logs_old`, existing constraints and indexes may still have names like:
+
+```text
+audit_logs_pkey
+audit_logs_project_id_fkey
+audit_logs_user_id_fkey
+```
+
+The new table may fail to create constraints with the same names. Rename old constraints after the table rename:
+
+```sql
+ALTER TABLE label_schema.audit_logs_old
+RENAME CONSTRAINT audit_logs_pkey TO audit_logs_old_pkey;
+```
+
+Do the same for old FK constraints if needed.
 
 ### Existing Foreign Keys
 
