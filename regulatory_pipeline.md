@@ -109,16 +109,28 @@ LlamaParse is used with `tier="cost_effective"` and `version="latest"`. It runs 
 
 LiteParse is the final fallback. It runs locally through the Python SDK, not the CLI. It provides a last-resort path that keeps the pipeline from failing completely when external providers are unavailable.
 
+## Progress Reporting
+
+Regulatory OCR progress is written to Redis through `label/utils/processing_progress.py` using the `regulatory_documents` progress kind and the regulatory document ID. The `/rag/process-all-embedding-projectid` API reads this value in `_collect_project_embedding_status_sync` and returns it on each in-progress regulatory item.
+
+Progress behavior is provider-specific:
+
+- Mistral primary and fallback reset progress to `0` when each Mistral attempt starts, then update incrementally after each processed PDF chunk using completed pages over total pages.
+- LlamaParse has no chunk-level callback in the current SDK path, so it reports a hardcoded `50%` marker when the LlamaParse fallback starts.
+- LiteParse reports a hardcoded `80%` marker when the LiteParse fallback starts.
+
+The processing route clears the Redis progress key when the request finishes or fails. Once `processed_bbox_key` is stored on the `RegulatoryDocument`, the document stops appearing as an OCR in-progress item and becomes eligible for indexing.
+
 ## Idempotency Rules
 
-The new route performs idempotent reuse only for completed Mistral regulatory outputs.
+The new route performs idempotent reuse only for completed Mistral regulatory outputs. It checks the current document first, so repeated clicks on the process button return the existing processed folder instead of running OCR again.
 
 A result is reusable only when all of these are true:
 
-- The source SHA matches the new document.
-- The previous document is within `MISTRAL_IDEMPOTENT_BBOX_REUSE_DAYS`.
-- The previous row has `processed_bbox_s3_keys`, `structured_json_key`, and `firstpage`.
-- The previous row has `processed_bbox_key`, so the new document can point to the same processed folder.
+- For same-document reuse, the current document already has completed Mistral processed metadata.
+- For duplicate-document reuse, the source SHA matches another recent document within `MISTRAL_IDEMPOTENT_BBOX_REUSE_DAYS`.
+- The reusable row has `processed_bbox_s3_keys`, `structured_json_key`, and `firstpage`.
+- The reusable row has `processed_bbox_key`, so the new document can point to the same processed folder.
 - `processed_bbox_s3_keys.provider == "mistral"`.
 - The S3 metadata contains `combined_md`, `llm_md`, and `llm_json`.
 
@@ -149,7 +161,7 @@ flowchart LR
 
 ### Per-Worker Pipeline Queue
 
-`REGULATORY_PIPELINE_WORKER_LIMIT=1` means one full regulatory pipeline runs per Uvicorn worker process. With 4 Uvicorn workers, one backend container can run up to 4 full regulatory pipelines concurrently. Extra background jobs wait in the worker that accepted them.
+`REGULATORY_PIPELINE_WORKER_LIMIT=2` means two full regulatory pipelines can run per Uvicorn worker process. With 4 Uvicorn workers, one backend container can run up to 8 full regulatory pipelines concurrently. Extra background jobs wait in the worker that accepted them.
 
 This queue is implemented as an async semaphore, so waiting jobs do not block the event loop.
 
@@ -168,7 +180,7 @@ This distinction matters: worker limits protect app CPU/memory; Redis limits pro
 | Control | Type | Scope | Default / Setting | Applies To | Behavior |
 | --- | --- | --- | --- | --- | --- |
 | `PostgresAdvisoryLock("regulatory-processing-document", "<project_id>:<document_id_or_key>")` | PostgreSQL advisory lock | Global across workers and containers sharing Postgres | One lock per project/document | Full `/process/process-regulatory` request | Rejects a duplicate concurrent run for the same document with HTTP 409. |
-| `REGULATORY_PIPELINE_SEMAPHORE` | `asyncio.Semaphore` | One Uvicorn worker process | `REGULATORY_PIPELINE_WORKER_LIMIT`, default `1` | Full provider cascade and output writing | Queues full regulatory pipelines inside each worker. With 4 workers and value `1`, one container runs up to 4 full pipelines. |
+| `REGULATORY_PIPELINE_SEMAPHORE` | `asyncio.Semaphore` | One Uvicorn worker process | `REGULATORY_PIPELINE_WORKER_LIMIT`, default `2` | Full provider cascade and output writing | Queues full regulatory pipelines inside each worker. With 4 workers and value `2`, one container runs up to 8 full pipelines. |
 | `redis_semaphore("mistral-regulatory-ocr")` | Redis lease semaphore | Global across workers and containers sharing Redis | `MISTRAL_GLOBAL_LIMIT`, default from app settings | Each Mistral OCR chunk call | Limits concurrent Azure Mistral OCR calls across the deployment. |
 | `MISTRAL_REGULATORY_SEMAPHORE` | `threading.BoundedSemaphore` | One Uvicorn worker process | Hard-coded `2` | Each Mistral OCR chunk call | Adds local per-worker pressure control around Mistral SDK calls. |
 | `redis_semaphore("llamaparse-regulatory-ocr")` | Redis lease semaphore | Global across workers and containers sharing Redis | `LLAMAPARSE_GLOBAL_LIMIT`, default `1` | Each LlamaParse document parse call | Limits concurrent LlamaParse calls across the deployment. |
@@ -225,7 +237,7 @@ Key scaling properties:
 - S3 is the persistent artifact store; local filesystem paths are working/output cache for the app.
 - Provider failures degrade through fallbacks instead of stopping the entire workflow at the first service issue.
 
-For example, with 4 Uvicorn workers and `REGULATORY_PIPELINE_WORKER_LIMIT=1`, one container runs up to 4 full regulatory pipelines concurrently. With multiple containers, total pipeline capacity scales by container count, while `MISTRAL_GLOBAL_LIMIT` and `LLAMAPARSE_GLOBAL_LIMIT` still enforce global provider safety.
+For example, with 4 Uvicorn workers and `REGULATORY_PIPELINE_WORKER_LIMIT=2`, one container runs up to 8 full regulatory pipelines concurrently. With multiple containers, total pipeline capacity scales by container count, while `MISTRAL_GLOBAL_LIMIT` and `LLAMAPARSE_GLOBAL_LIMIT` still enforce global provider safety.
 
 ## Operational Settings
 
@@ -239,7 +251,7 @@ MISTRAL_IDEMPOTENT_BBOX_REUSE_DAYS=15
 MAX_PAGES_PER_CHUNK=30
 LLAMA_CLOUD_API_KEY=<secret>
 LLAMAPARSE_GLOBAL_LIMIT=1
-REGULATORY_PIPELINE_WORKER_LIMIT=1
+REGULATORY_PIPELINE_WORKER_LIMIT=2
 REGULATORY_MISTRAL_IMAGE_ANNOTATION_OPENAI_MODEL=gpt-5-mini
 REDIS_SEMAPHORE_LEASE_SECONDS=300
 REDIS_SEMAPHORE_WAIT_TIMEOUT_SECONDS=2400
