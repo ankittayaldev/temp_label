@@ -139,6 +139,7 @@ S3_REGION=ap-south-1
 Region auto-detection may not work reliably in every environment, so setting `S3_REGION` explicitly is safer.
 
 Source https://docs.aws.amazon.com/boto3/latest/guide/credentials.html
+
 <img width="489" height="316" alt="image" src="https://github.com/user-attachments/assets/b9cb82af-b380-4441-a15b-14fae7f8b86b" />
 
 
