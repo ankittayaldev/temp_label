@@ -122,6 +122,20 @@ def get_s3_client():
             ),
         )
         return _s3_client
+
+def _find_bucket_region(bucket_name: str) -> str:
+    s = get_settings()
+    try:
+        client = boto3.client(
+            "s3",
+            **_credential_kwargs(s),
+            config=Config(signature_version="s3v4"),
+        )
+        response = client.get_bucket_location(Bucket=bucket_name)
+    except (BotoCoreError, ClientError) as exc:
+        raise RuntimeError(f"Failed to resolve S3 bucket region: {exc}")
+    return response.get("LocationConstraint") or "us-east-1"
+
 ```
 
 Required `.env` value:
