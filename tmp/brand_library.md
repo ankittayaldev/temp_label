@@ -82,12 +82,20 @@ Restore (via unified `PUT /v2/brand` or `PUT /v2/brand/file` with `active=True`)
 
 Value sets are enforced by DB `CHECK` constraints:
 ```sql
-ck_brand_files_document_type    -- NULL OR IN ('PI','ISI','ASSET','SCOPE','ZIP','CUSTOM')
-ck_brand_files_ai_document_type -- same set
+ck_brand_files_document_type    -- NULL OR IN ('PI','ISI','ASSET','SCOPE','CUSTOM')
+ck_brand_files_ai_document_type -- NULL OR IN ('PI','ISI','ASSET','SCOPE','CUSTOM')
 ck_brand_files_filetype         -- IN ('pdf','word','zip','txt','json','ppt')
 ```
 
 ## 6. Disk-Based Staging Pipeline & Metadata Autofill
+
+### 6.1 Backend-Enforced File Size Limits (413 Payload Too Large)
+To protect server resources and prevent memory spikes, strict file size limits are enforced by the backend at both the HTTP upload stream level and during recursive ZIP archive extraction:
+- **Max ZIP Archive Limit**: `500 MB`
+- **Max PDF Limit**: `200 MB`
+- **Max Other Files Limit** (Word `.docx`, `.txt`, `.json`, `.ppt`): `100 MB`
+
+Violations at any stage immediately abort processing and return an `HTTP 413 Payload Too Large` error with a clear error payload.
 
 ### Why Disk-Based Streaming?
 In initial drafts, file uploads used an in-memory stream (`upload_bytes` / `download_bytes`). In an enterprise setting where concurrent users upload large files (500MB+ presentations or high-resolution documentation), buffering whole payloads in RAM immediately leads to Out-Of-Memory (OOM) fatal crashes. 
@@ -100,9 +108,10 @@ To eliminate this memory hazard:
 
 ### Automatic ZIP Decompression & Ingestion
 When a user uploads a `.zip` file, the backend automatically intercepts and decompresses it on disk:
-- The archive is expanded inside a secure temporary workspace.
+- `.zip` is purely a file container format, not a document type. The archive is expanded inside a secure temporary workspace.
 - The system walks the directory tree recursively (`rglob("*")`), ignoring system artifacts (such as `.DS_Store` or `__MACOSX` resource forks).
-- Every supported document found inside the archive is ingested as an independent `brand_file` record under the target brand folder.
+- Every supported document found inside the archive is ingested as an independent `brand_file` record under the target brand folder and classified individually.
+- Per-file size limits (200MB PDF, 100MB others) and overall unpack limit (500MB) are strictly validated during traversal.
 - The outer ZIP container file itself is discarded after decompression, avoiding duplicate disk or S3 consumption.
 
 ### LiteParse Extraction
@@ -113,7 +122,6 @@ When a user uploads a `.zip` file, the backend automatically intercepts and deco
 output_format="text", ocr_enabled=False, ocr_failure_fatal=False,
 image_mode="off", extract_images=False, extract_links=False,
 extract_annotations=False, extract_form_fields=False, extract_structure_tree=False,
-extract_xfa_packets=False, extract_vector_graphics=False,
 extract_text_metadata=False, emit_word_boxes=False,
 include_complexity=True, max_pages=1000, quiet=True
 ```
@@ -130,6 +138,7 @@ include_complexity=True, max_pages=1000, quiet=True
 ## 7. AI Document Type Classification
 
 Background task -> `classify_brand_document_type()` -> `get_brand_document_type_agent()`, wrapping `get_regulatory_image_annotation_model()` (`gpt-5-mini`).
+- Classification categories: `PI`, `ISI`, `ASSET`, `SCOPE`, `CUSTOM` (ZIP is excluded as it is a container, not a document type).
 - Structured schema: `{ AI_document_type: enum, confidence: int }`.
 - Results with confidence `< 50` are treated as low-confidence and discarded.
 - `ai_document_type` is advisory only and never overwrites a user-specified `document_type`.
@@ -249,3 +258,41 @@ When a user drops a `.zip` archive into the file uploader (`POST /v2/brand/file`
 Because parsing 500MB Word documents or running AI classification models (`gpt-5-mini`) can take several seconds, these tasks execute asynchronously on disk in backend worker threads after the HTTP upload finishes.
 - The upload response returns boolean indicator flags: `metadata_pending: true/false` and `ai_classification_pending: true/false`.
 - If either flag is `true`, your UI should display a subtle progress spinner on the file row and poll `GET /v2/brand/file/{brand_file_id}` every 2–3 seconds until the fields populated by background extraction (`word_count`, `total_pages`, `ai_document_type`, etc.) settle.
+
+#### 5. Enforced File Size Limits & Error Handling (HTTP 413)
+The frontend file uploader component should enforce client-side pre-validation and gracefully display error toasts for `413 Request Entity Too Large` status codes returned by the backend:
+- **Max ZIP File Limit**: `500 MB`
+- **Max PDF Limit**: `200 MB`
+- **Max Word / TXT / Other Files Limit** (`.docx`, `.txt`, `.json`, `.ppt`): `100 MB`
+- If any file or unpacked archive document exceeds these caps, the backend stream aborts with HTTP `413`. Frontend forms should validate file sizes prior to dispatching `POST /v2/brand/file`.
+
+
+---
+
+## 17. Automated CI/CD Deployment & End-to-End Verification
+
+### CI/CD Migration Execution (`.github/workflows/deploy.yml`)
+To guarantee database schema parity across staging and production deployments, `alembic upgrade head` is automatically invoked via AWS SSM right after container startup:
+
+```yaml
+"sudo -u ubuntu docker run -d --init --name label-backend ...",
+"sudo -u ubuntu docker run -d --init --name label-celery ...",
+"sudo -u ubuntu sh -c \"sleep 2 && docker exec label-backend alembic upgrade head\"",
+"sudo -u ubuntu /home/ubuntu/docker-cleanup.sh"
+```
+
+### End-to-End API Verification
+The complete 12-endpoint RESTful suite was verified live using Keycloak OAuth2 JWT authentication (`scratch/test_brand_apis.py`). All 12 endpoints passed 100%:
+1. `POST /v2/brand` -> Brand creation (`200 OK`)
+2. `GET /v2/brand/list` -> Search & pagination (`200 OK`)
+3. `GET /v2/brand/{brand_id}` -> Brand details & file count (`200 OK`)
+4. `PUT /v2/brand` -> Unified brand update (`200 OK`)
+5. `POST /v2/brand/file` -> Disk-streaming upload & ZIP extraction (`200 OK`)
+6. `GET /v2/brand/file/list` -> Brand file listing (`200 OK`)
+7. `GET /v2/brand/file/{brand_file_id}` -> File details (`200 OK`)
+8. `PUT /v2/brand/file` -> File metadata update (`200 OK`)
+9. `GET /v2/brand/file/{brand_file_id}/download-url` -> S3 Presigned URL (`200 OK`)
+10. `POST /v2/brand/file/{brand_file_id}/reprocess` -> Background task re-trigger (`200 OK`)
+11. `DELETE /v2/brand/file/{brand_file_id}` -> Soft-delete file (`200 OK`)
+12. `DELETE /v2/brand/{brand_id}` -> Soft-delete brand (`200 OK`)
+
